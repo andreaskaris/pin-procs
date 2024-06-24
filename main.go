@@ -216,17 +216,18 @@ func main() {
 	log.Printf("Started with parameters: discovery-mode: %t, pin-mode: %q, proc-name-filter: %q, status-file: %s/%%d/%s",
 		*discoveryMode, *pinMode, *procNameFilter, procDirectory, statusFile)
 
-	// netlink.ProcEventMonitor uses netlink to retrieve updates about processes. Must be run with sufficient privileges.
 	ctx := context.TODO()
-	procChan := make(chan netlink.ProcEvent)
-	errorChan := make(chan error)
-	if err := netlink.ProcEventMonitor(procChan, context.TODO().Done(), errorChan); err != nil {
-		log.Fatalf("Got an error from netlink.ProcEventMonitor during initialization, err: %q", err)
-	}
 	// Add a ticker to regularly scan all processes. The ProcEventMonitor does not work for vhost processes,
 	// unfortunately. It also can't hurt to have some extra logic that will (re)apply the settings every x seconds.
 	if *tickSeconds > 0 {
 		go tickMode(ctx, re, discoveryMode, pinMode, tickSeconds)
+	}
+
+	// netlink.ProcEventMonitor uses netlink to retrieve updates about processes. Must be run with sufficient privileges.
+	procChan := make(chan netlink.ProcEvent)
+	errorChan := make(chan error)
+	if err := netlink.ProcEventMonitor(procChan, context.TODO().Done(), errorChan); err != nil {
+		log.Fatalf("Got an error from netlink.ProcEventMonitor during initialization, err: %q", err)
 	}
 	for {
 		select {
