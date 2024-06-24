@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pin-procs
+  labels:
+    k8s-app: pin-procs-logging
+spec:
+  selector:
+    matchLabels:
+      name: pin-procs
+  template:
+    metadata:
+      labels:
+        name: pin-procs
+    spec:
+      tolerations:
+      - operator: Exists
+      hostPID: true
+      hostNetwork: true
+      containers:
+      - name: pin-procs
+        securityContext:
+          privileged: true
+          # capabilities:
+          #  add: #["NET_ADMIN"]
+          #    - ALL
+        image: quay.io/akaris/pin-procs:latest
+        # imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
+        command:
+        - /pin-procs
+        - "-pin-mode"
+        - "first" 
+        - "-tick-seconds"
+        - "5"
+        - "-proc-name-filter"
+        - "^vhost-.*"
+        volumeMounts:
+        - name: host
+          mountPath: /host
+      volumes:
+      - name: host
+        hostPath:
+          path: /
+      - name: config
+        configMap:
+          name: pin-procs
