@@ -188,6 +188,25 @@ func tickMode(ctx context.Context, re *regexp.Regexp, discoveryMode *bool, pinMo
 	}
 }
 
+// netlinkMode uses netlink.ProcEventMonitor to retrieve updates about processes. Must be run with sufficient privileges.
+func netlinkMode(ctx context.Context, re *regexp.Regexp, discoveryMode *bool, pinMode *string) {
+
+	procChan := make(chan netlink.ProcEvent)
+	errorChan := make(chan error)
+	if err := netlink.ProcEventMonitor(procChan, context.TODO().Done(), errorChan); err != nil {
+		log.Fatalf("Got an error from netlink.ProcEventMonitor during initialization, err: %q", err)
+	}
+	for {
+		select {
+		case p := <-procChan:
+			pid := p.Msg.Pid()
+			executeForPID(pid, re, discoveryMode, pinMode)
+		case err := <-errorChan:
+			log.Fatalf("Got an error from netlink.ProcEventMonitor during select, err: %q", err)
+		}
+	}
+}
+
 func main() {
 	// Parse provided parameters.
 	flag.Parse()
@@ -209,33 +228,19 @@ func main() {
 	re := regexp.MustCompile(*procNameFilter)
 
 	// Check if /host/proc exists, in that case we'll be looking there for process information (important for containerization).
-	if _, err := os.Stat("/host/proc"); err == nil {
-		procDirectory = path.Join("/host", procDirectory)
+	hostProc := path.Join("/host", procDirectory)
+	if _, err := os.Stat(hostProc); err == nil {
+		procDirectory = hostProc
 	}
 
 	log.Printf("Started with parameters: discovery-mode: %t, pin-mode: %q, proc-name-filter: %q, status-file: %s/%%d/%s",
 		*discoveryMode, *pinMode, *procNameFilter, procDirectory, statusFile)
 
+	// Either scan for processes every x ticks. Or use netlink to monitor for new processes.
 	ctx := context.TODO()
-	// Add a ticker to regularly scan all processes. The ProcEventMonitor does not work for vhost processes,
-	// unfortunately. It also can't hurt to have some extra logic that will (re)apply the settings every x seconds.
 	if *tickSeconds > 0 {
-		go tickMode(ctx, re, discoveryMode, pinMode, tickSeconds)
-	}
-
-	// netlink.ProcEventMonitor uses netlink to retrieve updates about processes. Must be run with sufficient privileges.
-	procChan := make(chan netlink.ProcEvent)
-	errorChan := make(chan error)
-	if err := netlink.ProcEventMonitor(procChan, context.TODO().Done(), errorChan); err != nil {
-		log.Fatalf("Got an error from netlink.ProcEventMonitor during initialization, err: %q", err)
-	}
-	for {
-		select {
-		case p := <-procChan:
-			pid := p.Msg.Pid()
-			executeForPID(pid, re, discoveryMode, pinMode)
-		case err := <-errorChan:
-			log.Fatalf("Got an error from netlink.ProcEventMonitor during select, err: %q", err)
-		}
+		tickMode(ctx, re, discoveryMode, pinMode, tickSeconds)
+	} else {
+		netlinkMode(ctx, re, discoveryMode, pinMode)
 	}
 }
